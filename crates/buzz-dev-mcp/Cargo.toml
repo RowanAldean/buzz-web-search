@@ -39,6 +39,9 @@ reqwest = { workspace = true }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 buzz-core = { workspace = true }
+# Parallel-powered web search and content extraction. Pin the demo to a
+# reviewed SDK commit until the crate is published on crates.io.
+parallel-web = { git = "https://github.com/RowanAldean/parallel-sdk-rust", rev = "71f32f2faa22474963202d388bfe9a7e1d5d78e8" }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["signal", "process"] }

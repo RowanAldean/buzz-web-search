@@ -31,6 +31,7 @@ export function PersonaProviderApiKeyField({
   isRequired,
   label,
   onValueChange,
+  testId = "persona-provider-api-key",
   value,
 }: {
   disabled: boolean;
@@ -50,6 +51,8 @@ export function PersonaProviderApiKeyField({
   /** Display label, e.g. "Anthropic API Key". */
   label: string;
   onValueChange: (next: string) => void;
+  /** Stable selector for surfaces that render more than one API-key field. */
+  testId?: string;
   /** Current agent-local value of the secret env var. */
   value: string;
 }) {
@@ -83,7 +86,7 @@ export function PersonaProviderApiKeyField({
             "h-8 flex-1 px-0 py-0 leading-6",
             PERSONA_FIELD_CONTROL_CLASS,
           )}
-          data-testid="persona-provider-api-key"
+          data-testid={testId}
           disabled={disabled}
           id={inputId}
           onChange={(event) => onValueChange(event.target.value)}

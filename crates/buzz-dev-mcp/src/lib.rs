@@ -10,6 +10,7 @@ use rmcp::{
 use std::path::Path;
 use std::sync::Arc;
 
+mod parallel_web;
 mod paths;
 mod read_file;
 mod rg;
@@ -69,6 +70,28 @@ impl DevMcp {
         Parameters(p): Parameters<view_image::ViewImageParams>,
     ) -> Result<CallToolResult, ErrorData> {
         view_image::run(&self.state, p).await
+    }
+
+    #[tool(
+        name = "web_search",
+        description = "Search the live web with Parallel and return ranked URLs plus LLM-ready excerpts. Provide a natural-language objective and one or more concise search queries. Use the returned session_id in follow-up web_search or web_fetch calls to preserve research context. Requires PARALLEL_API_KEY in the buzz-dev-mcp environment."
+    )]
+    async fn web_search(
+        &self,
+        Parameters(p): Parameters<parallel_web::WebSearchParams>,
+    ) -> Result<String, ErrorData> {
+        parallel_web::search(p).await
+    }
+
+    #[tool(
+        name = "web_fetch",
+        description = "Fetch and extract clean, LLM-ready Markdown from up to 20 public web URLs with Parallel. Supply an objective or search queries to focus the excerpts. Pass a session_id returned by web_search to continue the same research session. Requires PARALLEL_API_KEY in the buzz-dev-mcp environment."
+    )]
+    async fn web_fetch(
+        &self,
+        Parameters(p): Parameters<parallel_web::WebFetchParams>,
+    ) -> Result<String, ErrorData> {
+        parallel_web::fetch(p).await
     }
 
     #[tool(

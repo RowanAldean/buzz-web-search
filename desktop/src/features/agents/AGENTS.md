@@ -153,6 +153,16 @@ with a TypeScript lookup table or an id comparison in a component.
    themselves. Never synthesize a run location a surface doesn't have. Don't
    expose `respond-to`, `allowlist`, Nostr, or harness jargon in primary UI
    copy.
+12. **Parallel web access is optional and independent of the inference
+   harness.** `ui/ParallelWebSearchField.tsx` is the canonical masked control
+   for `PARALLEL_API_KEY` in global defaults, agent-template creation/editing,
+   and agent-instance editing. Keep the value in the existing `env_vars`
+   model so inheritance and process spawning remain authoritative, and hide
+   the key from `EnvVarsEditor` wherever the dedicated control renders.
+   Clearing a local value removes the key so the inherited value becomes
+   active again. Do not make this credential part of inference-provider
+   readiness, or gate the field on a hard-coded runtime ID: the same MCP tools
+   are intended to work across supported ACP harnesses.
 
 ## The tests that enforce this
 
@@ -170,6 +180,8 @@ with a TypeScript lookup table or an id comparison in a component.
 - `ui/respondToFieldContract.test.mjs` — plain-language mode labels, the
   persistent warning contract for shared agent access, and its two render
   positions (after the people picker for `allowlist`).
+- `ui/ParallelWebSearchField.test.mjs` — dedicated masked credential rendering,
+  env-var updates, and inheritance-resuming clear behavior.
 - `lib/agentAccessWarning.test.mjs` — every mode × run-location copy variant
   plus both resolvers, including unknown-reads-as-local and
   blank-`runOn`-is-not-a-provider.

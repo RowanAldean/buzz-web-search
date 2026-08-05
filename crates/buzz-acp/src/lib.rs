@@ -4281,12 +4281,13 @@ fn build_mcp_servers(config: &Config) -> Vec<McpServer> {
     if config.mcp_command.is_empty() {
         return vec![];
     }
+    let mcp_name = std::path::Path::new(&config.mcp_command)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mcp")
+        .to_string();
     vec![McpServer {
-        name: std::path::Path::new(&config.mcp_command)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("mcp")
-            .to_string(),
+        name: mcp_name.clone(),
         command: config.mcp_command.clone(),
         args: vec![],
         env: {
@@ -4327,6 +4328,22 @@ fn build_mcp_servers(config: &Config) -> Vec<McpServer> {
                         name: "BUZZ_ACP_DISPLAY_NAME".into(),
                         value: display_name,
                     });
+                }
+            }
+            // Parallel powers the web_search and web_fetch tools compiled into
+            // buzz-dev-mcp. Forward its credential through the ACP session
+            // declaration because buzz-agent intentionally clears inherited
+            // environment variables before spawning MCP servers. Restrict the
+            // handoff to the known server name so a custom MCP command cannot
+            // receive this credential merely by being selected alongside Buzz.
+            if mcp_name == "buzz-dev-mcp" {
+                if let Ok(api_key) = std::env::var("PARALLEL_API_KEY") {
+                    if !api_key.is_empty() {
+                        env.push(EnvVar {
+                            name: "PARALLEL_API_KEY".into(),
+                            value: api_key,
+                        });
+                    }
                 }
             }
             env
@@ -5240,6 +5257,60 @@ mod build_mcp_servers_tests {
                 .iter()
                 .any(|e| e.name == "BUZZ_ACP_DISPLAY_NAME"),
             "empty display name should not be forwarded"
+        );
+    }
+
+    #[test]
+    fn parallel_api_key_is_forwarded_to_buzz_dev_mcp() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("PARALLEL_API_KEY", "parallel-test-key");
+        let mut config = test_config();
+        config.mcp_command = "/opt/buzz/bin/buzz-dev-mcp".into();
+        let servers = build_mcp_servers(&config);
+        std::env::remove_var("PARALLEL_API_KEY");
+
+        let entry = servers[0]
+            .env
+            .iter()
+            .find(|entry| entry.name == "PARALLEL_API_KEY");
+        assert_eq!(
+            entry.map(|entry| entry.value.as_str()),
+            Some("parallel-test-key")
+        );
+    }
+
+    #[test]
+    fn parallel_api_key_is_not_forwarded_to_custom_mcp_servers() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("PARALLEL_API_KEY", "parallel-test-key");
+        let config = test_config();
+        let servers = build_mcp_servers(&config);
+        std::env::remove_var("PARALLEL_API_KEY");
+
+        assert!(
+            !servers[0]
+                .env
+                .iter()
+                .any(|entry| entry.name == "PARALLEL_API_KEY"),
+            "custom MCP commands must not receive the Parallel credential"
+        );
+    }
+
+    #[test]
+    fn empty_parallel_api_key_is_not_forwarded() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("PARALLEL_API_KEY", "");
+        let mut config = test_config();
+        config.mcp_command = "buzz-dev-mcp".into();
+        let servers = build_mcp_servers(&config);
+        std::env::remove_var("PARALLEL_API_KEY");
+
+        assert!(
+            !servers[0]
+                .env
+                .iter()
+                .any(|entry| entry.name == "PARALLEL_API_KEY"),
+            "empty Parallel credentials must not be forwarded"
         );
     }
 

@@ -47,6 +47,10 @@ import {
   AgentModelField,
 } from "@/features/agents/ui/agentConfigControls";
 import { PersonaProviderApiKeyField } from "@/features/agents/ui/PersonaProviderApiKeyField";
+import {
+  PARALLEL_API_KEY_ENV_VAR,
+  ParallelWebSearchField,
+} from "@/features/agents/ui/ParallelWebSearchField";
 import { usePersonaModelDiscovery } from "@/features/agents/ui/usePersonaModelDiscovery";
 import {
   BUZZ_AGENT_THINKING_EFFORT,
@@ -742,9 +746,17 @@ export function AgentConfigFields({
 
   const advancedEditorBlock = (
     <>
+      <ParallelWebSearchField
+        disabled={false}
+        envVars={config.env_vars}
+        inheritedEnvVars={bakedEnvMap}
+        inheritedLabel="Provided by this build"
+        onEnvVarsChange={handleEnvVarsChange}
+      />
       <EnvVarsEditor
         fileSatisfiedKeys={advancedFileSatisfiedEnvKeys}
         hiddenKeys={[
+          PARALLEL_API_KEY_ENV_VAR,
           ...(apiKeyEnvVar ? [apiKeyEnvVar] : []),
           ...allStructuredKeys,
         ]}

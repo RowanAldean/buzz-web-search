@@ -25,6 +25,10 @@ import {
   structuredEnvKeys,
   type RuntimeCatalogStatus,
 } from "../lib/agentConfigCore";
+import {
+  PARALLEL_API_KEY_ENV_VAR,
+  ParallelWebSearchField,
+} from "./ParallelWebSearchField";
 
 export function EditAgentAdvancedFields({
   acpCommand,
@@ -120,6 +124,7 @@ export function EditAgentAdvancedFields({
   const effectiveHiddenKeys = React.useMemo(
     () => [
       ...hiddenEnvKeys,
+      PARALLEL_API_KEY_ENV_VAR,
       ...(isBuzzAgentRuntime(modelTuningRuntimeId)
         ? [BUZZ_AGENT_THINKING_EFFORT]
         : []),
@@ -299,6 +304,14 @@ export function EditAgentAdvancedFields({
           </div>
         </div>
       )}
+
+      <ParallelWebSearchField
+        disabled={disabled}
+        envVars={envVars}
+        inheritedEnvVars={inheritedEnvVars}
+        inheritedLabel="Inherited from template / global defaults"
+        onEnvVarsChange={onEnvVarsChange}
+      />
 
       {/* Env vars */}
       <EnvVarsEditor

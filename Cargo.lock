@@ -1032,6 +1032,7 @@ dependencies = [
  "image",
  "nix 0.31.3",
  "nostr",
+ "parallel-web",
  "reqwest 0.13.4",
  "rmcp",
  "rustls",
@@ -6494,6 +6495,18 @@ checksum = "997ee03cd38c01469a7046643714f0ad28880bcb9e6679ff0666e24817ca19b7"
 dependencies = [
  "equivalent",
  "seize",
+]
+
+[[package]]
+name = "parallel-web"
+version = "0.1.0"
+source = "git+https://github.com/RowanAldean/parallel-sdk-rust?rev=71f32f2faa22474963202d388bfe9a7e1d5d78e8#71f32f2faa22474963202d388bfe9a7e1d5d78e8"
+dependencies = [
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

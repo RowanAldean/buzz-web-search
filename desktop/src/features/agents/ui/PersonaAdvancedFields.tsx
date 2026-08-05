@@ -28,6 +28,10 @@ import {
   structuredEnvKeys,
   type RuntimeCatalogStatus,
 } from "../lib/agentConfigCore";
+import {
+  PARALLEL_API_KEY_ENV_VAR,
+  ParallelWebSearchField,
+} from "./ParallelWebSearchField";
 
 export function PersonaAdvancedFields({
   behaviorDraft,
@@ -95,6 +99,7 @@ export function PersonaAdvancedFields({
   const effectiveHiddenKeys = React.useMemo(
     () => [
       ...hiddenEnvKeys,
+      PARALLEL_API_KEY_ENV_VAR,
       ...(isBuzzAgentRuntime(modelTuningRuntimeId)
         ? [BUZZ_AGENT_THINKING_EFFORT]
         : []),
@@ -192,6 +197,14 @@ export function PersonaAdvancedFields({
           />
         </div>
       </div>
+
+      <ParallelWebSearchField
+        disabled={disabled}
+        envVars={envVars}
+        inheritedEnvVars={inheritedEnvVars}
+        inheritedLabel="Inherited from global defaults"
+        onEnvVarsChange={onEnvVarsChange}
+      />
 
       <EnvVarsEditor
         disabled={disabled}

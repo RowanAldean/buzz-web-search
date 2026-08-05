@@ -241,6 +241,7 @@ A Rust workspace of focused crates. Single source of truth: the relay. See [ARCH
 
 ## Going further
 
+- **[Parallel-powered web search demo](docs/PARALLEL_WEB_SEARCH.md)** — build, inspect, and exercise `web_search` / `web_fetch` locally and through a Buzz agent
 - **[VISION.md](VISION.md)** · **[VISION_SOVEREIGN.md](VISION_SOVEREIGN.md)** · **[VISION_PROJECTS.md](VISION_PROJECTS.md)** · **[VISION_AGENT.md](VISION_AGENT.md)** — the four vision docs
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, kind ranges, subsystem boundaries
 - **[TESTING.md](TESTING.md)** — multi-agent E2E test suite
