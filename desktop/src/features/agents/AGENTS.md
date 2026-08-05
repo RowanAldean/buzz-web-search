@@ -154,6 +154,16 @@ with a TypeScript lookup table or an id comparison in a component.
    expose `respond-to`, `allowlist`, Nostr, or harness jargon in primary UI
    copy.
 
+12. **Tool integrations are session-scoped harness configuration.** The
+    desktop persists the generic ACP v2 server array in
+    `BUZZ_ACP_MCP_SERVERS`; `buzz-acp` merges it with (and never replaces)
+    the runtime-owned `BUZZ_ACP_MCP_COMMAND` server. The Parallel checkbox is
+    a preset for the anonymous Streamable HTTP endpoint, not a model-provider
+    field. Keep `BUZZ_ACP_MCP_SERVERS` hidden from the generic env editor and
+    preserve non-Parallel entries when toggling the preset. The visible
+    disclosure must say that queries and fetched URLs leave the self-hosted
+    Buzz relay. Header credentials are intentionally not exposed in this demo.
+
 ## The tests that enforce this
 
 - `lib/agentConfigCore.test.mjs` — field model per harness × scope, clearing
@@ -163,6 +173,8 @@ with a TypeScript lookup table or an id comparison in a component.
   `shouldRenderModelControl` (successful-empty omit vs failure keep). If this
   fails, you probably reintroduced a per-surface flag or conflated empty with
   failed discovery.
+- `ui/toolIntegrationsField.test.mjs` — the Parallel preset preserves custom
+  servers, removes only its own named entry, and refuses malformed JSON.
 - `ui/usePersonaModelDiscovery.test.mjs` — `synthesizeEmptyDiscoveryStatus`,
   `isCacheableDiscoveryResponse`, `deriveModelDiscoveryPending`,
   `isSuccessfulEmptyDiscovery`. If the "reopen to retry" copy becomes inert

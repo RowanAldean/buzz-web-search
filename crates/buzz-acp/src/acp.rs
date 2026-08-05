@@ -22,19 +22,72 @@ const MAX_LINE_SIZE: usize = 10_000_000; // 10 MB
 
 /// An MCP server configuration passed to `session/new`.
 ///
-/// Corresponds to the `McpServerStdio` variant in the ACP schema.
-/// All four fields are **required** by the schema (`args` and `env` may be empty arrays).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct McpServer {
-    pub name: String,
-    pub command: String,
-    pub args: Vec<String>,
-    pub env: Vec<EnvVar>,
+/// ACP v2 uses a tagged union so clients can attach both local stdio servers
+/// and remote Streamable HTTP servers to the same session.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum McpServer {
+    /// A local MCP subprocess connected over stdin/stdout.
+    Stdio {
+        name: String,
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: Vec<EnvVar>,
+    },
+    /// A remote MCP endpoint connected using Streamable HTTP.
+    Http {
+        name: String,
+        url: String,
+        #[serde(default)]
+        headers: Vec<HttpHeader>,
+    },
+}
+
+impl McpServer {
+    /// Return the stable server name used to qualify its tool names.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Stdio { name, .. } | Self::Http { name, .. } => name,
+        }
+    }
+
+    /// Return the remote endpoint URL for an HTTP server.
+    pub fn http_url(&self) -> Option<&str> {
+        match self {
+            Self::Http { url, .. } => Some(url),
+            Self::Stdio { .. } => None,
+        }
+    }
+
+    /// Add an environment variable when this is a stdio server.
+    pub fn push_stdio_env(&mut self, value: EnvVar) {
+        if let Self::Stdio { env, .. } = self {
+            env.push(value);
+        }
+    }
+
+    /// Return stdio environment variables, if applicable.
+    #[cfg(test)]
+    pub fn stdio_env(&self) -> Option<&[EnvVar]> {
+        match self {
+            Self::Stdio { env, .. } => Some(env),
+            Self::Http { .. } => None,
+        }
+    }
 }
 
 /// A single environment variable for an MCP server.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct EnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+/// A single HTTP header sent to a remote MCP server.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct HttpHeader {
     pub name: String,
     pub value: String,
 }
@@ -2464,8 +2517,8 @@ mod tests {
 
     #[test]
     fn session_new_mcp_server_has_required_fields() {
-        // Schema requires name, command, args, env — all present, args/env may be empty.
-        let server = McpServer {
+        // Schema requires type, name, command, args, env — arrays may be empty.
+        let server = McpServer::Stdio {
             name: "test-mcp".into(),
             command: "/usr/local/bin/test-mcp-server".into(),
             args: vec![],
@@ -2481,6 +2534,7 @@ mod tests {
             ],
         };
         let serialized = serde_json::to_value(&server).unwrap();
+        assert_eq!(serialized["type"].as_str(), Some("stdio"));
         assert_eq!(serialized["name"].as_str(), Some("test-mcp"));
         assert_eq!(
             serialized["command"].as_str(),
@@ -2494,6 +2548,23 @@ mod tests {
             serialized["env"][0]["name"].as_str(),
             Some("BUZZ_RELAY_URL")
         );
+    }
+
+    #[test]
+    fn session_new_http_mcp_server_uses_acp_v2_shape() {
+        let server = McpServer::Http {
+            name: "parallel-web".into(),
+            url: "https://search.parallel.ai/mcp".into(),
+            headers: vec![],
+        };
+        let serialized = serde_json::to_value(&server).unwrap();
+        assert_eq!(serialized["type"].as_str(), Some("http"));
+        assert_eq!(serialized["name"].as_str(), Some("parallel-web"));
+        assert_eq!(
+            serialized["url"].as_str(),
+            Some("https://search.parallel.ai/mcp")
+        );
+        assert_eq!(serialized["headers"].as_array().map(Vec::len), Some(0));
     }
 
     #[test]

@@ -299,7 +299,7 @@ async fn initialize(id: Value, params: Value, wire_tx: &WireSender) {
                 "agentCapabilities": {
                     "loadSession": false,
                     "promptCapabilities": { "image": false, "audio": false, "embeddedContext": false },
-                    "mcpCapabilities": { "http": false, "sse": false },
+                    "mcpCapabilities": { "http": true, "sse": false },
                 },
                 "agentInfo": { "name": "buzz-agent", "version": env!("CARGO_PKG_VERSION") },
             }),

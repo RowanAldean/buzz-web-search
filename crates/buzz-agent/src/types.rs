@@ -354,6 +354,22 @@ impl StopReason {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum McpServer {
+    Stdio(McpServerStdio),
+    Http(McpServerHttp),
+}
+
+impl McpServer {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Stdio(server) => &server.name,
+            Self::Http(server) => &server.name,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct McpServerStdio {
     pub name: String,
     pub command: String,
@@ -361,6 +377,20 @@ pub struct McpServerStdio {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: Vec<EnvVar>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct McpServerHttp {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub headers: Vec<HttpHeader>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

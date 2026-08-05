@@ -4278,60 +4278,65 @@ async fn run_models(args: ModelsArgs) -> Result<()> {
 }
 
 fn build_mcp_servers(config: &Config) -> Vec<McpServer> {
+    let mut servers = config.mcp_servers.clone();
     if config.mcp_command.is_empty() {
-        return vec![];
+        return servers;
     }
-    vec![McpServer {
-        name: std::path::Path::new(&config.mcp_command)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("mcp")
-            .to_string(),
-        command: config.mcp_command.clone(),
-        args: vec![],
-        env: {
-            let mut env = vec![
-                EnvVar {
-                    name: "BUZZ_RELAY_URL".into(),
-                    value: config.relay_url.clone(),
-                },
-                EnvVar {
-                    name: "BUZZ_PRIVATE_KEY".into(),
-                    // bech32 encoding of a valid secret key is infallible.
-                    // Panic here is correct: injecting a bogus secret would cause
-                    // delayed, hard-to-diagnose agent failures downstream.
-                    value: config
-                        .keys
-                        .secret_key()
-                        .to_bech32()
-                        .expect("secret key bech32 encoding should never fail"),
-                },
-            ];
-            // Forward BUZZ_AUTH_TAG (NIP-OA owner attestation credential)
-            // so the MCP server can attach it to every signed event.
-            if let Ok(auth_tag) = std::env::var("BUZZ_AUTH_TAG") {
-                if !auth_tag.is_empty() {
-                    env.push(EnvVar {
-                        name: "BUZZ_AUTH_TAG".into(),
-                        value: auth_tag,
-                    });
+    servers.insert(
+        0,
+        McpServer::Stdio {
+            name: std::path::Path::new(&config.mcp_command)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("mcp")
+                .to_string(),
+            command: config.mcp_command.clone(),
+            args: vec![],
+            env: {
+                let mut env = vec![
+                    EnvVar {
+                        name: "BUZZ_RELAY_URL".into(),
+                        value: config.relay_url.clone(),
+                    },
+                    EnvVar {
+                        name: "BUZZ_PRIVATE_KEY".into(),
+                        // bech32 encoding of a valid secret key is infallible.
+                        // Panic here is correct: injecting a bogus secret would cause
+                        // delayed, hard-to-diagnose agent failures downstream.
+                        value: config
+                            .keys
+                            .secret_key()
+                            .to_bech32()
+                            .expect("secret key bech32 encoding should never fail"),
+                    },
+                ];
+                // Forward BUZZ_AUTH_TAG (NIP-OA owner attestation credential)
+                // so the MCP server can attach it to every signed event.
+                if let Ok(auth_tag) = std::env::var("BUZZ_AUTH_TAG") {
+                    if !auth_tag.is_empty() {
+                        env.push(EnvVar {
+                            name: "BUZZ_AUTH_TAG".into(),
+                            value: auth_tag,
+                        });
+                    }
                 }
-            }
-            // Forward the agent's display name so dev-mcp can use it as the git
-            // author name instead of the raw npub. Read from the process env
-            // rather than Config: this is a pass-through of a contract owned
-            // upstream, and absent simply means dev-mcp falls back to the npub.
-            if let Ok(display_name) = std::env::var("BUZZ_ACP_DISPLAY_NAME") {
-                if !display_name.is_empty() {
-                    env.push(EnvVar {
-                        name: "BUZZ_ACP_DISPLAY_NAME".into(),
-                        value: display_name,
-                    });
+                // Forward the agent's display name so dev-mcp can use it as the git
+                // author name instead of the raw npub. Read from the process env
+                // rather than Config: this is a pass-through of a contract owned
+                // upstream, and absent simply means dev-mcp falls back to the npub.
+                if let Ok(display_name) = std::env::var("BUZZ_ACP_DISPLAY_NAME") {
+                    if !display_name.is_empty() {
+                        env.push(EnvVar {
+                            name: "BUZZ_ACP_DISPLAY_NAME".into(),
+                            value: display_name,
+                        });
+                    }
                 }
-            }
-            env
+                env
+            },
         },
-    }]
+    );
+    servers
 }
 
 #[cfg(test)]
@@ -5101,6 +5106,7 @@ mod build_mcp_servers_tests {
             agent_command: "goose".into(),
             agent_args: vec!["acp".into()],
             mcp_command: "test-mcp-server".into(),
+            mcp_servers: vec![],
             idle_timeout_secs: config::DEFAULT_IDLE_TIMEOUT_SECS,
             max_turn_duration_secs: config::DEFAULT_MAX_TURN_DURATION_SECS,
             agents: 1,
@@ -5146,9 +5152,14 @@ mod build_mcp_servers_tests {
         let servers = build_mcp_servers(&config);
         assert_eq!(servers.len(), 1);
         let server = &servers[0];
-        assert_eq!(server.name, "test-mcp-server");
+        assert_eq!(server.name(), "test-mcp-server");
 
-        let names: Vec<&str> = server.env.iter().map(|e| e.name.as_str()).collect();
+        let names: Vec<&str> = server
+            .stdio_env()
+            .expect("Buzz-owned MCP is stdio")
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
         assert!(
             names.contains(&"BUZZ_RELAY_URL"),
             "missing BUZZ_RELAY_URL; got {names:?}"
@@ -5160,6 +5171,22 @@ mod build_mcp_servers_tests {
     }
 
     #[test]
+    fn generic_integrations_are_merged_after_buzz_owned_mcp() {
+        let mut config = test_config();
+        config.mcp_servers = vec![McpServer::Http {
+            name: "parallel-web".into(),
+            url: "https://search.parallel.ai/mcp".into(),
+            headers: vec![],
+        }];
+
+        let servers = build_mcp_servers(&config);
+
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].name(), "test-mcp-server");
+        assert_eq!(servers[1].name(), "parallel-web");
+    }
+
+    #[test]
     fn session_new_mcp_server_forwards_buzz_auth_tag() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("BUZZ_AUTH_TAG", "test-attestation-tag");
@@ -5168,7 +5195,11 @@ mod build_mcp_servers_tests {
         std::env::remove_var("BUZZ_AUTH_TAG");
 
         let server = &servers[0];
-        let auth_tag_env = server.env.iter().find(|e| e.name == "BUZZ_AUTH_TAG");
+        let auth_tag_env = server
+            .stdio_env()
+            .expect("Buzz-owned MCP is stdio")
+            .iter()
+            .find(|e| e.name == "BUZZ_AUTH_TAG");
         assert!(
             auth_tag_env.is_some(),
             "BUZZ_AUTH_TAG should be forwarded when set"
@@ -5185,7 +5216,11 @@ mod build_mcp_servers_tests {
         std::env::remove_var("BUZZ_AUTH_TAG");
 
         let server = &servers[0];
-        let has_auth_tag = server.env.iter().any(|e| e.name == "BUZZ_AUTH_TAG");
+        let has_auth_tag = server
+            .stdio_env()
+            .expect("Buzz-owned MCP is stdio")
+            .iter()
+            .any(|e| e.name == "BUZZ_AUTH_TAG");
         assert!(!has_auth_tag, "empty BUZZ_AUTH_TAG should not be forwarded");
     }
 
@@ -5198,7 +5233,8 @@ mod build_mcp_servers_tests {
         std::env::remove_var("BUZZ_ACP_DISPLAY_NAME");
 
         let entry = servers[0]
-            .env
+            .stdio_env()
+            .expect("Buzz-owned MCP is stdio")
             .iter()
             .find(|e| e.name == "BUZZ_ACP_DISPLAY_NAME");
         assert_eq!(
@@ -5219,7 +5255,8 @@ mod build_mcp_servers_tests {
         // falls back to the npub when the key is missing or blank.
         assert!(
             !servers[0]
-                .env
+                .stdio_env()
+                .expect("Buzz-owned MCP is stdio")
                 .iter()
                 .any(|e| e.name == "BUZZ_ACP_DISPLAY_NAME"),
             "unset display name should not add the key"
@@ -5236,7 +5273,8 @@ mod build_mcp_servers_tests {
 
         assert!(
             !servers[0]
-                .env
+                .stdio_env()
+                .expect("Buzz-owned MCP is stdio")
                 .iter()
                 .any(|e| e.name == "BUZZ_ACP_DISPLAY_NAME"),
             "empty display name should not be forwarded"
@@ -5260,7 +5298,7 @@ mod build_mcp_servers_tests {
         config.mcp_command = "/opt/bin/my-mcp-server".into();
         let servers = build_mcp_servers(&config);
         assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].name, "my-mcp-server");
+        assert_eq!(servers[0].name(), "my-mcp-server");
     }
 
     #[test]
@@ -5282,7 +5320,8 @@ mod build_mcp_servers_tests {
         let servers = build_mcp_servers(&config);
         assert_eq!(servers.len(), 1);
         assert_eq!(
-            servers[0].name, "mcp",
+            servers[0].name(),
+            "mcp",
             "Path::new(\".\").file_stem() is None — should fall back to \"mcp\""
         );
     }
@@ -5323,6 +5362,7 @@ mod error_outcome_emission_tests {
             agent_command: "true".into(),
             agent_args: vec![],
             mcp_command: "test-mcp-server".into(),
+            mcp_servers: vec![],
             idle_timeout_secs: config::DEFAULT_IDLE_TIMEOUT_SECS,
             max_turn_duration_secs: config::DEFAULT_MAX_TURN_DURATION_SECS,
             agents: 1,

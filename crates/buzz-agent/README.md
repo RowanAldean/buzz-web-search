@@ -259,7 +259,7 @@ By default (`OPENAI_COMPAT_API=auto`) the agent picks **Responses** when `OPENAI
 
 ## MCP Servers
 
-The client passes MCP server specs in `session/new`. The agent spawns each one as a stdio subprocess, calls `tools/list`, and merges everything into a single tool catalog the LLM sees. Tool names are namespaced as `server__tool` (double underscore separator). Bare tool names containing `__` are rejected at registration.
+The client passes MCP server specs in `session/new`. The agent connects to each stdio or Streamable HTTP server, calls `tools/list`, and merges everything into a single tool catalog the LLM sees. Tool names are namespaced as `server__tool` (double underscore separator). Bare tool names containing `__` are rejected at registration.
 
 Example: a single echo MCP server.
 
@@ -272,6 +272,7 @@ Example: a single echo MCP server.
     "cwd": "/work",
     "mcpServers": [
       {
+        "type": "stdio",
         "name": "echo",
         "command": "/usr/local/bin/echo-mcp",
         "args": ["--mode", "stdio"],
@@ -284,9 +285,18 @@ Example: a single echo MCP server.
 }
 ```
 
-Multiple servers: just add more entries. Tool calls fan out to the right server by namespace prefix.
+For a remote server, use ACP v2's HTTP shape:
 
-**Transport: stdio only.** No HTTP, no SSE. We advertise this in `agentCapabilities` (`mcpCapabilities.http: false`, `mcpCapabilities.sse: false`); spec-compliant clients won't ask for what we don't have.
+```json
+{
+  "type": "http",
+  "name": "web",
+  "url": "https://example.com/mcp",
+  "headers": []
+}
+```
+
+Multiple servers and transports may be mixed in one session. Tool calls fan out to the right server by namespace prefix. HTTP is advertised in `agentCapabilities`; legacy SSE remains unsupported.
 
 ## Security Model
 
@@ -297,6 +307,7 @@ The trust boundary is **the operator who launched the agent**. The harness, MCP 
 | Stdout discipline | Single-consumer `mpsc` channel feeding stdout. No two tasks can interleave bytes. All logs go to stderr. |
 | MCP child env | Whitelist (`PATH`, `HOME`, `TERM`, `LANG`, `LC_ALL`, `TMPDIR`) plus what the client explicitly passes. Your `ANTHROPIC_API_KEY` does not leak into MCP children. |
 | MCP child lifetime | Process group via `setpgid(0,0)` in `pre_exec`. On transport break or shutdown: `killpg(SIGKILL)`. Grandchildren die too. |
+| Remote MCP | Only `http` and `https` URLs are accepted. Configured headers go only to that server and must be treated as secrets by the ACP client. |
 | Server poisoning | After a timeout or transport break, the offending server is marked dead. Future calls trigger a lazy restart with exponential backoff. Other servers keep working. |
 | Frame size | `BUZZ_AGENT_MAX_LINE_BYTES` (default 4 MiB). Oversize → connection killed. |
 | LLM response size | 16 MiB hard cap. Both `Content-Length` precheck and streaming-buffer cap. |
@@ -334,7 +345,7 @@ A short list, because the answer is mostly "no":
 - **Not an SDK.** This is a binary. The protocol seam is stdin/stdout. Use it from any language.
 - **Not a UI.** No TUI, no web, no notifications. The client renders.
 - **Not authenticated.** API keys come from env. Use systemd, Docker secrets, or a wrapper.
-- **Not networked MCP.** Stdio transport only. No HTTP/SSE MCP transport.
+- **Not legacy SSE MCP.** MCP supports stdio and Streamable HTTP; deprecated SSE transport is intentionally omitted.
 - **Not load-able.** No `session/load`. We advertise `loadSession: false`.
 - **Not a router.** No agent-to-agent, no fan-out, no orchestration. One model. One loop.
 

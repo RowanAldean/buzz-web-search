@@ -62,6 +62,10 @@ import { SettingsOptionGroup } from "@/features/settings/ui/SettingsOptionGroup"
 import { AdvancedRequiredBadge } from "./AdvancedRequiredBadge";
 import { CardMintKeyCue } from "./CardMintKeyCue";
 import { getGlobalAgentCredentialState } from "./globalAgentCredentialState";
+import {
+  MCP_SERVERS_ENV_KEY,
+  ToolIntegrationsField,
+} from "./ToolIntegrationsField";
 
 export const EMPTY_GLOBAL_CONFIG: GlobalAgentConfig = {
   env_vars: {},
@@ -392,11 +396,7 @@ export function AgentConfigFields({
   const healOnMount =
     fieldModel.dependentValuePolicy.onCatalogMismatch === "onboardingCleanup";
   const userEditedProviderRef = React.useRef(false);
-  // Advanced visibility is user-controlled. Provider changes can add required
-  // rows, but must not open this section without an explicit toggle click.
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
-  // Read inside effects via ref so biome's exhaustive-deps stays honest:
-  // refs are stable, and healOnMount is captured at declaration.
   const mayMutateDependentFieldsRef = React.useRef(false);
   mayMutateDependentFieldsRef.current =
     healOnMount || userEditedProviderRef.current;
@@ -747,6 +747,7 @@ export function AgentConfigFields({
         hiddenKeys={[
           ...(apiKeyEnvVar ? [apiKeyEnvVar] : []),
           ...allStructuredKeys,
+          MCP_SERVERS_ENV_KEY,
         ]}
         inheritedRows={bakedGenericRows}
         inheritedRowsLabel="build"
@@ -892,6 +893,10 @@ export function AgentConfigFields({
 
       {showAdvancedFields ? (
         <div className={cn(blockClassName, "space-y-3")}>
+          <ToolIntegrationsField
+            envVars={config.env_vars}
+            onChange={handleEnvVarsChange}
+          />
           <CardMintKeyCue envVars={config.env_vars} />
           <button
             aria-expanded={advancedOpen}

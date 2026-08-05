@@ -256,6 +256,15 @@ pub struct CliArgs {
     #[arg(long, env = "BUZZ_ACP_MCP_COMMAND", default_value = "")]
     pub mcp_command: String,
 
+    /// Additional session-scoped MCP integrations encoded as an ACP v2 JSON array.
+    #[arg(
+        long,
+        env = "BUZZ_ACP_MCP_SERVERS",
+        default_value = "[]",
+        hide_env_values = true
+    )]
+    pub mcp_servers: String,
+
     /// Idle timeout: max seconds of silence before killing a turn.
     /// Resets on any agent stdout activity.
     #[arg(long, env = "BUZZ_ACP_IDLE_TIMEOUT")]
@@ -494,6 +503,7 @@ pub struct Config {
     pub agent_command: String,
     pub agent_args: Vec<String>,
     pub mcp_command: String,
+    pub mcp_servers: Vec<crate::acp::McpServer>,
     pub idle_timeout_secs: u64,
     pub max_turn_duration_secs: u64,
     pub agents: u32,
@@ -1054,12 +1064,63 @@ impl Config {
 
         validate_multiple_event_handling(args.multiple_event_handling, args.dedup)?;
 
+        let mcp_servers = serde_json::from_str::<Vec<crate::acp::McpServer>>(&args.mcp_servers)
+            .map_err(|error| {
+                ConfigError::ConfigFile(format!("invalid BUZZ_ACP_MCP_SERVERS JSON: {error}"))
+            })?;
+        let total_mcp_servers = mcp_servers.len() + usize::from(!args.mcp_command.is_empty());
+        if total_mcp_servers > 16 {
+            return Err(ConfigError::ConfigFile(format!(
+                "configured {total_mcp_servers} MCP servers; maximum is 16 including Buzz's runtime-owned server"
+            )));
+        }
+        let mut mcp_names = HashSet::new();
+        if !args.mcp_command.is_empty() {
+            mcp_names.insert(
+                std::path::Path::new(&args.mcp_command)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("mcp")
+                    .to_owned(),
+            );
+        }
+        for server in &mcp_servers {
+            let name = server.name();
+            let valid_name = !name.is_empty()
+                && name.len() <= 128
+                && !name.contains("__")
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
+            if !valid_name {
+                return Err(ConfigError::ConfigFile(format!(
+                    "invalid MCP server name '{name}' in BUZZ_ACP_MCP_SERVERS"
+                )));
+            }
+            if !mcp_names.insert(name.to_owned()) {
+                return Err(ConfigError::ConfigFile(format!(
+                    "duplicate MCP server name '{name}'"
+                )));
+            }
+            if let Some(raw_url) = server.http_url() {
+                let url = Url::parse(raw_url).map_err(|error| {
+                    ConfigError::ConfigFile(format!("invalid URL for MCP server '{name}': {error}"))
+                })?;
+                if !matches!(url.scheme(), "http" | "https") {
+                    return Err(ConfigError::ConfigFile(format!(
+                        "MCP server '{name}' must use an http or https URL"
+                    )));
+                }
+            }
+        }
+
         let config = Config {
             keys,
             relay_url: args.relay_url,
             agent_command,
             agent_args,
             mcp_command: args.mcp_command,
+            mcp_servers,
             idle_timeout_secs,
             max_turn_duration_secs,
             agents: args.agents,
@@ -1125,12 +1186,13 @@ impl Config {
             format!(" allowed_respond_to=[{}]", modes.join(","))
         };
         format!(
-            "relay={} pubkey={} agent_cmd={} {} mcp_cmd={} idle_timeout={}s max_turn={}s agents={} heartbeat={}s subscribe={:?} dedup={:?} meh={:?} ignore_self={} context_limit={} max_turns_per_session={} presence={} typing={} memory={} model={} permission_mode={} {}{}",
+            "relay={} pubkey={} agent_cmd={} {} mcp_cmd={} integrations={} idle_timeout={}s max_turn={}s agents={} heartbeat={}s subscribe={:?} dedup={:?} meh={:?} ignore_self={} context_limit={} max_turns_per_session={} presence={} typing={} memory={} model={} permission_mode={} {}{}",
             self.relay_url,
             self.keys.public_key().to_hex(),
             self.agent_command,
             self.agent_args.join(" "),
             self.mcp_command,
+            self.mcp_servers.len(),
             self.idle_timeout_secs,
             self.max_turn_duration_secs,
             self.agents,
@@ -1439,6 +1501,7 @@ mod tests {
             agent_command: "goose".into(),
             agent_args: vec!["acp".into()],
             mcp_command: "".into(),
+            mcp_servers: vec![],
             idle_timeout_secs: DEFAULT_IDLE_TIMEOUT_SECS,
             max_turn_duration_secs: DEFAULT_MAX_TURN_DURATION_SECS,
             agents: 1,

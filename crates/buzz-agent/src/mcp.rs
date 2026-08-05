@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 use arc_swap::ArcSwap;
 use rmcp::model::CallToolRequestParams;
 use rmcp::service::{RoleClient, RunningService};
-use rmcp::transport::TokioChildProcess;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::ServiceError;
 use rmcp::ServiceExt;
 use serde_json::{Map, Value};
@@ -14,7 +15,7 @@ use tokio::sync::watch;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::config::{Config, HookServers};
-use crate::types::{clamp, AgentError, McpServerStdio, ToolDef, ToolResult, ToolResultContent};
+use crate::types::{clamp, AgentError, McpServer, ToolDef, ToolResult, ToolResultContent};
 
 const SEP: &str = "__";
 const MAX_NAME_LEN: usize = 128;
@@ -115,10 +116,21 @@ type Client = RunningService<RoleClient, ()>;
 #[derive(Clone)]
 struct ServerSpec {
     name: String,
-    command: String,
-    args: Vec<String>,
-    env: Vec<(String, String)>,
-    cwd: String,
+    transport: ServerTransport,
+}
+
+#[derive(Clone)]
+enum ServerTransport {
+    Stdio {
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        cwd: String,
+    },
+    Http {
+        url: String,
+        headers: Vec<(String, String)>,
+    },
 }
 
 enum ClientState {
@@ -201,7 +213,7 @@ pub struct McpRegistry {
 impl McpRegistry {
     pub async fn spawn_all(
         cfg: &Config,
-        servers: &[McpServerStdio],
+        servers: &[McpServer],
         cwd: &str,
     ) -> Result<Self, AgentError> {
         if servers.len() > MAX_MCP_SERVERS {
@@ -224,25 +236,41 @@ impl McpRegistry {
 
         let mut seen_names = HashSet::new();
         for s in servers {
-            if !valid_name(&s.name) || s.name.contains("__") {
-                return Err(AgentError::Mcp(format!("invalid server name: {}", s.name)));
-            }
-            if !seen_names.insert(s.name.clone()) {
+            if !valid_name(s.name()) || s.name().contains("__") {
                 return Err(AgentError::Mcp(format!(
-                    "duplicate server name: {}",
-                    s.name
+                    "invalid server name: {}",
+                    s.name()
                 )));
             }
+            if !seen_names.insert(s.name().to_owned()) {
+                return Err(AgentError::Mcp(format!(
+                    "duplicate server name: {}",
+                    s.name()
+                )));
+            }
+            let transport = match s {
+                McpServer::Stdio(server) => ServerTransport::Stdio {
+                    command: server.command.clone(),
+                    args: server.args.clone(),
+                    env: server
+                        .env
+                        .iter()
+                        .map(|e| (e.name.clone(), e.value.clone()))
+                        .collect(),
+                    cwd: cwd.to_owned(),
+                },
+                McpServer::Http(server) => ServerTransport::Http {
+                    url: server.url.clone(),
+                    headers: server
+                        .headers
+                        .iter()
+                        .map(|header| (header.name.clone(), header.value.clone()))
+                        .collect(),
+                },
+            };
             let spec = ServerSpec {
-                name: s.name.clone(),
-                command: s.command.clone(),
-                args: s.args.clone(),
-                env: s
-                    .env
-                    .iter()
-                    .map(|e| (e.name.clone(), e.value.clone()))
-                    .collect(),
-                cwd: cwd.to_owned(),
+                name: s.name().to_owned(),
+                transport,
             };
             let (client, pgid, tool_names, raw_tools) = spawn_one(&spec, reg.init_timeout).await?;
             let server_idx = reg.servers.len();
@@ -268,7 +296,7 @@ impl McpRegistry {
                 if !valid_name(&bare) || bare.contains("__") {
                     return Err(AgentError::Mcp(format!("invalid tool name: {bare}")));
                 }
-                let qname = format!("{}{SEP}{}", s.name, bare);
+                let qname = format!("{}{SEP}{}", s.name(), bare);
                 if qname.len() > MAX_QNAME_LEN {
                     return Err(AgentError::Mcp(format!(
                         "qualified tool name too long: {} ({} > {MAX_QNAME_LEN})",
@@ -739,8 +767,27 @@ async fn spawn_one(
     spec: &ServerSpec,
     timeout: Duration,
 ) -> Result<(Client, Option<u32>, Vec<String>, Vec<rmcp::model::Tool>), AgentError> {
-    let mut cmd = Command::new(&spec.command);
-    cmd.args(&spec.args);
+    match &spec.transport {
+        ServerTransport::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        } => spawn_stdio(spec, command, args, env, cwd, timeout).await,
+        ServerTransport::Http { url, headers } => spawn_http(spec, url, headers, timeout).await,
+    }
+}
+
+async fn spawn_stdio(
+    spec: &ServerSpec,
+    command: &str,
+    args: &[String],
+    env: &[(String, String)],
+    cwd: &str,
+    timeout: Duration,
+) -> Result<(Client, Option<u32>, Vec<String>, Vec<rmcp::model::Tool>), AgentError> {
+    let mut cmd = Command::new(command);
+    cmd.args(args);
     cmd.env_clear();
     for k in PASSTHROUGH_ENV {
         if let Ok(v) = std::env::var(k) {
@@ -753,10 +800,10 @@ async fn spawn_one(
             cmd.env(k, v);
         }
     }
-    for (k, v) in &spec.env {
+    for (k, v) in env {
         cmd.env(k, v);
     }
-    cmd.current_dir(&spec.cwd);
+    cmd.current_dir(cwd);
     cmd.stderr(std::process::Stdio::inherit());
 
     #[cfg(unix)]
@@ -810,6 +857,67 @@ async fn spawn_one(
     let names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
     guard.pgid = None;
     Ok((client, pgid, names, tools))
+}
+
+async fn spawn_http(
+    spec: &ServerSpec,
+    url: &str,
+    headers: &[(String, String)],
+    timeout: Duration,
+) -> Result<(Client, Option<u32>, Vec<String>, Vec<rmcp::model::Tool>), AgentError> {
+    let parsed_url = reqwest::Url::parse(url)
+        .map_err(|error| AgentError::Mcp(format!("invalid URL for {}: {error}", spec.name)))?;
+    if !matches!(parsed_url.scheme(), "http" | "https") {
+        return Err(AgentError::Mcp(format!(
+            "invalid URL scheme for {}: {}",
+            spec.name,
+            parsed_url.scheme()
+        )));
+    }
+
+    let mut custom_headers = std::collections::HashMap::new();
+    for (name, value) in headers {
+        let name = reqwest::header::HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
+            AgentError::Mcp(format!("invalid header name for {}: {error}", spec.name))
+        })?;
+        let value = reqwest::header::HeaderValue::from_str(value).map_err(|error| {
+            AgentError::Mcp(format!("invalid header value for {}: {error}", spec.name))
+        })?;
+        custom_headers.insert(name, value);
+    }
+
+    let transport = StreamableHttpClientTransport::from_config(
+        StreamableHttpClientTransportConfig::with_uri(parsed_url.to_string())
+            .custom_headers(custom_headers),
+    );
+    let client: Client = match tokio::time::timeout(timeout, ().serve(transport)).await {
+        Ok(Ok(client)) => client,
+        Ok(Err(error)) => {
+            return Err(AgentError::Mcp(format!("init {}: {error}", spec.name)));
+        }
+        Err(_) => {
+            return Err(AgentError::Mcp(timeout_msg("init", &spec.name, timeout)));
+        }
+    };
+
+    let tools = match tokio::time::timeout(timeout, client.peer().list_all_tools()).await {
+        Ok(Ok(tools)) => tools,
+        Ok(Err(error)) => {
+            return Err(AgentError::Mcp(format!(
+                "list_tools {}: {error}",
+                spec.name
+            )));
+        }
+        Err(_) => {
+            return Err(AgentError::Mcp(timeout_msg(
+                "list_tools",
+                &spec.name,
+                timeout,
+            )));
+        }
+    };
+    let names = tools.iter().map(|tool| tool.name.to_string()).collect();
+    Ok((client, None, names, tools))
 }
 
 /// Send `notifications/cancelled` to the MCP server, fire-and-forget.
