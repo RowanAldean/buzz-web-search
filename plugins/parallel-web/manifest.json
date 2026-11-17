@@ -1,0 +1,8 @@
+{
+  "id": "ai.parallel.web-search",
+  "name": "Parallel Web Search",
+  "apiVersion": 1,
+  "description": "Search the public web and read pages with Parallel. Adds shared agent tools. Uses your API key for the current app session.",
+  "discovery": { "category": "agent-tools", "tags": ["search", "web", "research", "parallel"] },
+  "host": { "networkOrigins": ["https://api.parallel.ai"] }
+}
