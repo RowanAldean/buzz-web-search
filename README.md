@@ -1,3 +1,5 @@
+> **Parallel plugin for Buzz 1.0:** Install [plugins/parallel-web](plugins/parallel-web/README.md) from this branch. It adds shared Search and Extract tools without building this legacy Buzz application. The upstream application README follows.
+
 <h1 align="center">Buzz 🐝</h1>
 
 <p align="center">
